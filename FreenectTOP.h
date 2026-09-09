@@ -94,7 +94,7 @@ private:
     void fn1_execute(TD::TOP_Output* output, const TD::OP_Inputs* inputs);
     void fn2_execute(TD::TOP_Output* output, const TD::OP_Inputs* inputs);
     void uploadFallbackBuffer(int targetIndex = -1);
-    static constexpr int kNumOutputs = 4; // 0 RGB, 1 depth, 2 point cloud, 3 IR
+    static constexpr int kNumOutputs = 6; // 0 RGB, 1 depth, 2 point cloud, 3 IR, 4 registered color, 5 depth->color UV
     void uploadDepthFrame(TD::TOP_Output* output, const std::vector<float>& depthMM, int width, int height);
     
     // Error/warning string handling
@@ -129,9 +129,13 @@ private:
     float depthThreshMin, depthThreshMax;
     depthFormatEnum depthFormat = depthFormatEnum::Raw;
     depthOutputEnum depthOutput = depthOutputEnum::Normalized;
+    pcSpaceEnum pcSpace = pcSpaceEnum::DepthCamera;
+    bool pcFlipX = false, pcFlipY = false, pcFlipZ = false;
     
     bool streamEnabledIR;
     bool streamEnabledDepth;
     bool streamEnabledPC;
+    bool streamEnabledRegColor = false;
+    bool streamEnabledUV = false;
     
 };

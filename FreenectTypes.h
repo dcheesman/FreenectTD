@@ -20,3 +20,9 @@ enum class depthOutputEnum {
     Millimeters,  // Mono32Float, value in mm, 0 = invalid / outside threshold
     Meters        // Mono32Float, value in m,  0 = invalid / outside threshold
 };
+
+// Point Cloud Format parameter (v2 only): which camera the point cloud is expressed in
+enum class pcSpaceEnum {
+    DepthCamera,  // "Raw": 512x424, XYZ (m) relative to the depth/IR camera; aligned with Registered Color / UV outputs
+    ColorCamera   // "Registered": 1920x1080, XYZ (m) relative to the color camera, pixel-aligned to the RGB output
+};

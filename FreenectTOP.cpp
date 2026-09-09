@@ -136,6 +136,21 @@ void FreenectTOP::setupParameters(TD::OP_ParameterManager* manager, void*) {
     enableIRParam.maxValues[0] = enableIRParam.maxSliders[0] = 1.0;
     enableIRParam.clampMins[0] = enableIRParam.clampMaxes[0] = true;
     manager->appendToggle(enableIRParam);
+
+    // Registered color (index 4), depth->color UV map (index 5) and point cloud axis flips (v2 only)
+    const char* extraToggleNames[]  = {"Enableregcolor", "Enableuv", "Pcflipx", "Pcflipy", "Pcflipz"};
+    const char* extraToggleLabels[] = {"Enable Registered Color", "Enable Depth-to-Color UV", "Flip Point Cloud X", "Flip Point Cloud Y", "Flip Point Cloud Z"};
+    for (int i = 0; i < 5; ++i) {
+        OP_NumericParameter t;
+        t.name = extraToggleNames[i];
+        t.label = extraToggleLabels[i];
+        t.page = "Freenect";
+        t.defaultValues[0] = 0.0;
+        t.minValues[0] = t.minSliders[0] = 0.0;
+        t.maxValues[0] = t.maxSliders[0] = 1.0;
+        t.clampMins[0] = t.clampMaxes[0] = true;
+        manager->appendToggle(t);
+    }
     
     // Depth format dropdown
     OP_StringParameter depthFormatParam;
@@ -801,7 +816,7 @@ void FreenectTOP::fn2_execute(TD::TOP_Output* output, const TD::OP_Inputs* input
     // --- Point Cloud frame ---
     if (streamEnabledPC) {
         std::vector<float> pointCloudFrame;
-        if (pointCloudFrameBuffer && fn2_device->getPointCloudFrame(pointCloudFrame)) {
+        if (pointCloudFrameBuffer && fn2_device->getPointCloudFrame(pointCloudFrame, pcSpace, depthThreshMin, depthThreshMax, pcFlipX, pcFlipY, pcFlipZ)) {
             errorString.clear();
             std::memcpy(pointCloudFrameBuffer->data, pointCloudFrame.data(), fn2_pcW * fn2_pcH * 4 * sizeof(float));
             TD::TOP_UploadInfo info;
@@ -816,6 +831,41 @@ void FreenectTOP::fn2_execute(TD::TOP_Output* output, const TD::OP_Inputs* input
     } else {
         uploadFallbackBuffer(2);
     }
+
+    // --- Registered color (index 4) and depth-to-color UV map (index 5) ---
+    if (streamEnabledRegColor || streamEnabledUV) {
+        const int rw = MyFreenect2Device::DEPTH_WIDTH;
+        const int rh = MyFreenect2Device::DEPTH_HEIGHT;
+        std::vector<uint8_t> regColor;
+        std::vector<float> regUV;
+        if (fntdContext && fn2_device->getRegisteredColorFrame(regColor, regUV)) {
+            TD::TOP_UploadInfo info;
+            info.textureDesc.width = rw;
+            info.textureDesc.height = rh;
+            info.textureDesc.texDim = TD::OP_TexDim::e2D;
+            info.firstPixel = TD::TOP_FirstPixel::TopLeft;
+            if (streamEnabledRegColor) {
+                TD::OP_SmartRef<TD::TOP_Buffer> buf = fntdContext->createOutputBuffer(rw * rh * 4, TD::TOP_BufferFlags::None, nullptr);
+                if (buf) {
+                    std::memcpy(buf->data, regColor.data(), rw * rh * 4);
+                    info.textureDesc.pixelFormat = TD::OP_PixelFormat::RGBA8Fixed;
+                    info.colorBufferIndex = 4;
+                    output->uploadBuffer(&buf, info, nullptr);
+                }
+            }
+            if (streamEnabledUV) {
+                TD::OP_SmartRef<TD::TOP_Buffer> buf = fntdContext->createOutputBuffer(rw * rh * 4 * sizeof(float), TD::TOP_BufferFlags::None, nullptr);
+                if (buf) {
+                    std::memcpy(buf->data, regUV.data(), rw * rh * 4 * sizeof(float));
+                    info.textureDesc.pixelFormat = TD::OP_PixelFormat::RGBA32Float;
+                    info.colorBufferIndex = 5;
+                    output->uploadBuffer(&buf, info, nullptr);
+                }
+            }
+        }
+    }
+    if (!streamEnabledRegColor) uploadFallbackBuffer(4);
+    if (!streamEnabledUV) uploadFallbackBuffer(5);
 
     // --- IR frame ---
     if (streamEnabledIR) {
@@ -877,6 +927,11 @@ void FreenectTOP::execute(TD::TOP_Output* output, const TD::OP_Inputs* inputs, v
     streamEnabledIR = (inputs->getParInt("Enableir") != 0);
     streamEnabledDepth = (inputs->getParInt("Enabledepth") != 0);
     streamEnabledPC = (inputs->getParInt("Enablepointcloud") != 0);
+    streamEnabledRegColor = (inputs->getParInt("Enableregcolor") != 0);
+    streamEnabledUV = (inputs->getParInt("Enableuv") != 0);
+    pcFlipX = (inputs->getParInt("Pcflipx") != 0);
+    pcFlipY = (inputs->getParInt("Pcflipy") != 0);
+    pcFlipZ = (inputs->getParInt("Pcflipz") != 0);
     {
         const char* c = inputs->getParString("Depthoutput");
         std::string depthOutputStr = c ? c : "";
@@ -908,6 +963,12 @@ void FreenectTOP::execute(TD::TOP_Output* output, const TD::OP_Inputs* inputs, v
         fn2_depthW = fn2_colorW;
         fn2_depthH = fn2_colorH;
     }
+    // Registered format also puts the point cloud in the color camera, pixel-aligned with RGB
+    pcSpace = (depthFormat == depthFormatEnum::Registered) ? pcSpaceEnum::ColorCamera : pcSpaceEnum::DepthCamera;
+    if (devType == "Kinect v2" && pcSpace == pcSpaceEnum::ColorCamera) {
+        fn2_pcW = fn2_colorW;
+        fn2_pcH = fn2_colorH;
+    }
     
     // Enable/disable parameters based on device type
     auto dynamicParameterEnable = [&](const char* name, bool v1, bool v2, bool other = true) {
@@ -924,6 +985,10 @@ void FreenectTOP::execute(TD::TOP_Output* output, const TD::OP_Inputs* inputs, v
     dynamicParameterEnable("V2rgbresolution", false, true);
     dynamicParameterEnable("V2irresolution", false, true);
     dynamicParameterEnable("V2pcresolution", false, true);
+    for (const char* n : {"Enableregcolor", "Enableuv", "Pcflipx", "Pcflipy", "Pcflipz"}) dynamicParameterEnable(n, false, true);
+    if (devType == "Kinect v2" && pcSpace == pcSpaceEnum::ColorCamera) {
+        inputs->enablePar("V2pcresolution", false);
+    }
     
     // Enable/disable depthUndistort based on device type and depthFormat
     if (devType == "Kinect v2" && (depthFormat == depthFormatEnum::Raw || depthFormat == depthFormatEnum::RawUndistorted)) {

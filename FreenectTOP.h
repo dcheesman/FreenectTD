@@ -29,14 +29,9 @@
 #include <vector>
 #include <mutex>
 
+#include "FreenectTypes.h"
 #include "FreenectV1.h"
 #include "FreenectV2.h"
-
-enum class depthFormatEnum {
-    Raw,
-    RawUndistorted,
-    Registered
-};
 
 class FreenectTOP : public TD::TOP_CPlusPlusBase {
     

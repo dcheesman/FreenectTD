@@ -12,12 +12,6 @@
 #include <chrono>
 #include <Accelerate/Accelerate.h>
 
-// depthFormatEnum enum definition (shared between v1 and v2)
-enum class depthFormatEnum {
-    Raw,
-    RawUndistorted,
-    Registered
-};
 
 // MyFreenectDevice class constructor
 MyFreenectDevice::MyFreenectDevice

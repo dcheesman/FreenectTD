@@ -11,8 +11,7 @@
 
 #include <libfreenect/libfreenect.hpp>
 
-// Forward declaration - depthFormatEnum is defined in FreenectTOP.h
-enum class depthFormatEnum;
+#include "FreenectTypes.h"
 
 enum class fn1_colorType {
     RGB,

@@ -42,7 +42,7 @@ extern "C" {
         info->customOPInfo.minInputs = 0;
         info->customOPInfo.maxInputs = 0;
         info->customOPInfo.majorVersion = 1;
-        info->customOPInfo.minorVersion = 0;
+        info->customOPInfo.minorVersion = 1;
         #if TD_VERSION == 2025
             info->customOPInfo.opHelpURL->setString("https://github.com/stosumarte/FreenectTD");
         #endif

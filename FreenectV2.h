@@ -12,14 +12,13 @@
 #include <libfreenect2/libfreenect2.hpp>
 #include <libfreenect2/frame_listener_impl.h>
 #include <libfreenect2/registration.h>
+#include "FreenectTypes.h"
 #include <libfreenect2/packet_pipeline.h>
 
 #include <thread>
 #include <mutex>
 #include <atomic>
 
-// Forward declaration - depthFormatEnum is defined in FreenectTOP.h
-enum class depthFormatEnum;
 
 class MyFreenect2Device {
 public:

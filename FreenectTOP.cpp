@@ -6,6 +6,7 @@
 //
 
 #include "FreenectTOP.h"
+#include <algorithm>
 #include "ofxKinectExtras.h"
 #include "logger.h"
 #include <atomic>
@@ -145,6 +146,16 @@ void FreenectTOP::setupParameters(TD::OP_ParameterManager* manager, void*) {
     const char* depthFormatNames[] = {"Raw", "Registered"};
     const char* depthFormatLabels[] = {"Raw", "Registered"};
     manager->appendMenu(depthFormatParam, 2, depthFormatNames, depthFormatLabels);
+
+    // Depth output packing
+    OP_StringParameter depthOutputParam;
+    depthOutputParam.name = "Depthoutput";
+    depthOutputParam.label = "Depth Output";
+    depthOutputParam.page = "Freenect";
+    depthOutputParam.defaultValue = "Normalized";
+    const char* depthOutputNames[] = {"Normalized", "Millimeters", "Meters"};
+    const char* depthOutputLabels[] = {"Normalized 16-bit (0-1 over threshold range)", "Millimeters (32-bit float)", "Meters (32-bit float)"};
+    manager->appendMenu(depthOutputParam, 3, depthOutputNames, depthOutputLabels);
     
     // Undistort toggle
     OP_NumericParameter depthUndistortParam;
@@ -701,7 +712,6 @@ void FreenectTOP::fn1_execute(TD::TOP_Output* output, const TD::OP_Inputs* input
     
     // Create output buffers
     TD::OP_SmartRef<TD::TOP_Buffer> colorFrameBuffer = fntdContext ? fntdContext->createOutputBuffer(fn1_colorW * fn1_colorH * 4, TD::TOP_BufferFlags::None, nullptr) : TD::OP_SmartRef<TD::TOP_Buffer>();
-    TD::OP_SmartRef<TD::TOP_Buffer> depthFrameBuffer = fntdContext ? fntdContext->createOutputBuffer(fn1_depthW * fn1_depthH * 2, TD::TOP_BufferFlags::None, nullptr) : TD::OP_SmartRef<TD::TOP_Buffer>();
     
     // --- Color frame ---
     std::vector<uint8_t> colorFrame;
@@ -721,21 +731,11 @@ void FreenectTOP::fn1_execute(TD::TOP_Output* output, const TD::OP_Inputs* input
     }
     
     // --- Depth frame ---
-    std::vector<uint16_t> depthFrame;
     if (streamEnabledDepth) {
-        if (depthFrameBuffer && fn1_device->getDepthFrame(depthFrame, depthFormat, depthThreshMin, depthThreshMax)) {
+        std::vector<float> depthFrame; // millimetres, 0 = invalid
+        if (fn1_device->getDepthFrame(depthFrame, depthFormat, depthThreshMin, depthThreshMax)) {
             errorString.clear();
-            std::memcpy(depthFrameBuffer->data, depthFrame.data(), fn1_depthW * fn1_depthH * 2);
-            TD::TOP_UploadInfo info;
-            info.textureDesc.width = fn1_depthW;
-            info.textureDesc.height = fn1_depthH;
-            info.textureDesc.texDim = TD::OP_TexDim::e2D;
-            info.textureDesc.pixelFormat = TD::OP_PixelFormat::Mono16Fixed;
-            info.colorBufferIndex = 1;
-            info.firstPixel = TD::TOP_FirstPixel::TopLeft;
-            output->uploadBuffer(&depthFrameBuffer, info, nullptr);
-        } else {
-            LOG("[FreenectTOP] executeV1: failed to create depth output buffer");
+            uploadDepthFrame(output, depthFrame, fn1_depthW, fn1_depthH);
         }
     } else {
         uploadFallbackBuffer(1);
@@ -769,7 +769,6 @@ void FreenectTOP::fn2_execute(TD::TOP_Output* output, const TD::OP_Inputs* input
 
     // Create output buffers
     TD::OP_SmartRef<TD::TOP_Buffer> colorFrameBuffer = fntdContext ? fntdContext->createOutputBuffer(fn2_colorW * fn2_colorH * 4, TD::TOP_BufferFlags::None, nullptr) : TD::OP_SmartRef<TD::TOP_Buffer>();
-    TD::OP_SmartRef<TD::TOP_Buffer> depthFrameBuffer = fntdContext ? fntdContext->createOutputBuffer(fn2_depthW * fn2_depthH * 2, TD::TOP_BufferFlags::None, nullptr) : TD::OP_SmartRef<TD::TOP_Buffer>();
     TD::OP_SmartRef<TD::TOP_Buffer> pointCloudFrameBuffer = fntdContext ? fntdContext->createOutputBuffer(fn2_pcW * fn2_pcH * 4 * sizeof(float), TD::TOP_BufferFlags::None, nullptr) : TD::OP_SmartRef<TD::TOP_Buffer>();
     TD::OP_SmartRef<TD::TOP_Buffer> irFrameBuffer = fntdContext ? fntdContext->createOutputBuffer(fn2_irW * fn2_irH * 2, TD::TOP_BufferFlags::None, nullptr) : TD::OP_SmartRef<TD::TOP_Buffer>();
 
@@ -790,18 +789,10 @@ void FreenectTOP::fn2_execute(TD::TOP_Output* output, const TD::OP_Inputs* input
     
     // --- Depth frame ---
     if (streamEnabledDepth) {
-        std::vector<uint16_t> depthFrame;
-        if (depthFrameBuffer && fn2_device->getDepthFrame(depthFrame, depthFormat, depthThreshMin, depthThreshMax)) {
+        std::vector<float> depthFrame; // millimetres, 0 = invalid
+        if (fn2_device->getDepthFrame(depthFrame, depthFormat, depthThreshMin, depthThreshMax)) {
             errorString.clear();
-            std::memcpy(depthFrameBuffer->data, depthFrame.data(), fn2_depthW * fn2_depthH * 2);
-            TD::TOP_UploadInfo info;
-            info.textureDesc.width = fn2_depthW;
-            info.textureDesc.height = fn2_depthH;
-            info.textureDesc.texDim = TD::OP_TexDim::e2D;
-            info.textureDesc.pixelFormat = TD::OP_PixelFormat::Mono16Fixed;
-            info.colorBufferIndex = 1;
-            info.firstPixel = TD::TOP_FirstPixel::TopLeft;
-            output->uploadBuffer(&depthFrameBuffer, info, nullptr);
+            uploadDepthFrame(output, depthFrame, fn2_depthW, fn2_depthH);
         }
     } else {
         uploadFallbackBuffer(1);
@@ -886,6 +877,13 @@ void FreenectTOP::execute(TD::TOP_Output* output, const TD::OP_Inputs* inputs, v
     streamEnabledIR = (inputs->getParInt("Enableir") != 0);
     streamEnabledDepth = (inputs->getParInt("Enabledepth") != 0);
     streamEnabledPC = (inputs->getParInt("Enablepointcloud") != 0);
+    {
+        const char* c = inputs->getParString("Depthoutput");
+        std::string depthOutputStr = c ? c : "";
+        depthOutput = (depthOutputStr == "Millimeters") ? depthOutputEnum::Millimeters
+                    : (depthOutputStr == "Meters")      ? depthOutputEnum::Meters
+                                                        : depthOutputEnum::Normalized;
+    }
     
     fn1_tilt = static_cast<float>(inputs->getParDouble("Tilt"));
     
@@ -988,6 +986,53 @@ void FreenectTOP::execute(TD::TOP_Output* output, const TD::OP_Inputs* inputs, v
 }
 
 // Upload a fallback black buffer
+// Packs a millimetre depth map into the output texture at index 1 according to the Depthoutput parameter.
+void FreenectTOP::uploadDepthFrame(TD::TOP_Output* output, const std::vector<float>& depthMM, int width, int height) {
+    if (!output || !fntdContext || width <= 0 || height <= 0) return;
+    const size_t pixelCount = static_cast<size_t>(width) * height;
+    if (depthMM.size() < pixelCount) {
+        LOG("[FreenectTOP] uploadDepthFrame: depth buffer smaller than requested size");
+        return;
+    }
+
+    const bool packed16 = (depthOutput == depthOutputEnum::Normalized);
+    const size_t bytes = pixelCount * (packed16 ? sizeof(uint16_t) : sizeof(float));
+    TD::OP_SmartRef<TD::TOP_Buffer> buf = fntdContext->createOutputBuffer(bytes, TD::TOP_BufferFlags::None, nullptr);
+    if (!buf) {
+        LOG("[FreenectTOP] uploadDepthFrame: failed to create depth output buffer");
+        return;
+    }
+
+    if (packed16) {
+        // Legacy behaviour: 0..1 across the threshold window, 0 = invalid
+        uint16_t* dst = static_cast<uint16_t*>(buf->data);
+        const float denom = std::max(depthThreshMax - depthThreshMin, 1.0f);
+        #pragma omp parallel for if(pixelCount > 100000)
+        for (size_t i = 0; i < pixelCount; ++i) {
+            const float d = depthMM[i];
+            if (d <= 0.0f) { dst[i] = 0; continue; }
+            const float n = std::clamp((d - depthThreshMin) / denom, 0.0f, 1.0f);
+            dst[i] = static_cast<uint16_t>(n * 65535.0f + 0.5f);
+        }
+    } else {
+        float* dst = static_cast<float*>(buf->data);
+        const float scale = (depthOutput == depthOutputEnum::Meters) ? 0.001f : 1.0f;
+        #pragma omp parallel for if(pixelCount > 100000)
+        for (size_t i = 0; i < pixelCount; ++i) {
+            dst[i] = depthMM[i] * scale;
+        }
+    }
+
+    TD::TOP_UploadInfo info;
+    info.textureDesc.width = width;
+    info.textureDesc.height = height;
+    info.textureDesc.texDim = TD::OP_TexDim::e2D;
+    info.textureDesc.pixelFormat = packed16 ? TD::OP_PixelFormat::Mono16Fixed : TD::OP_PixelFormat::Mono32Float;
+    info.colorBufferIndex = 1;
+    info.firstPixel = TD::TOP_FirstPixel::TopLeft;
+    output->uploadBuffer(&buf, info, nullptr);
+}
+
 void FreenectTOP::uploadFallbackBuffer(int targetIndex) {
     if (!myCurrentOutput) {
         LOG("[FreenectTOP] uploadFallbackBuffer: myCurrentOutput is null");
@@ -999,7 +1044,7 @@ void FreenectTOP::uploadFallbackBuffer(int targetIndex) {
     std::vector<uint8_t> black(fallbackSize, 0);
 
     // Allocate and initialize each fallback buffer if not already
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < kNumOutputs; ++i) {
         if (!fallbackBuffers[i]) {
             fallbackBuffers[i] = fntdContext ? fntdContext->createOutputBuffer(
                 fallbackSize,
@@ -1018,11 +1063,11 @@ void FreenectTOP::uploadFallbackBuffer(int targetIndex) {
     info.textureDesc.texDim = TD::OP_TexDim::e2D;
     info.textureDesc.pixelFormat = TD::OP_PixelFormat::RGBA8Fixed;
 
-    if (targetIndex >= 0 && targetIndex < 4) {
+    if (targetIndex >= 0 && targetIndex < kNumOutputs) {
         info.colorBufferIndex = targetIndex;
         myCurrentOutput->uploadBuffer(&fallbackBuffers[targetIndex], info, nullptr);
     } else {
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < kNumOutputs; ++i) {
             info.colorBufferIndex = i;
             myCurrentOutput->uploadBuffer(&fallbackBuffers[i], info, nullptr);
         }

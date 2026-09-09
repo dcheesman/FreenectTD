@@ -13,3 +13,10 @@ enum class depthFormatEnum {
     RawUndistorted, // v2 only: lens-undistorted depth camera image
     Registered      // depth re-projected into the color camera (1920x1080 on v2, 640x480 on v1)
 };
+
+// How depth values are packed into the output texture
+enum class depthOutputEnum {
+    Normalized,   // Mono16Fixed, 0..1 across [threshMin, threshMax] (legacy behaviour)
+    Millimeters,  // Mono32Float, value in mm, 0 = invalid / outside threshold
+    Meters        // Mono32Float, value in m,  0 = invalid / outside threshold
+};

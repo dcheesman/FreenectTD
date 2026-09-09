@@ -49,7 +49,8 @@ public:
     void processFrames();
     // Unified processed frame methods for v2
     bool getColorFrame(std::vector<uint8_t>& out);
-    bool getDepthFrame(std::vector<uint16_t>& out, depthFormatEnum type, float depthThreshMin, float depthThreshMax);
+    // Depth in millimetres (float), 0 = invalid / outside threshold
+    bool getDepthFrame(std::vector<float>& out, depthFormatEnum type, float depthThreshMin, float depthThreshMax);
     bool getIRFrame(std::vector<uint16_t>& out);
     bool getPointCloudFrame(std::vector<float>& out);
     // Setters for buffer injection
@@ -78,8 +79,12 @@ private:
     std::vector<float>      downscaledDepthBuffer;
     std::vector<float>      bigdepthBufferCropped;
     std::vector<float>      flipDstBuffer;
-    std::vector<float>      registeredCroppedBuffer;
-    bool                    lastRegisteredDepthValid = false;
+    std::vector<int>        colorDepthMap;
+    uint64_t                depthSeq_ = 0;   // incremented for every new depth frame
+    uint64_t                regSeq_ = 0;     // depthSeq_ the cached registration was computed for
+    bool                    regHasBigdepth_ = false;
+    libfreenect2::Freenect2Device::ColorCameraParams colorParams_{};
+    bool ensureRegistration(bool needBigdepth);
     std::mutex              mutex;
     bool                    hasNewRGB;
     bool                    hasNewDepth;

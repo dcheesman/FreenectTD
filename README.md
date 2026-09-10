@@ -108,6 +108,8 @@ Example .toe project files are provided in this repository, under the `toe_examp
 
 ### Known limitations
 
+* While *Active* is on the operator cooks every frame, even when nothing is viewing it, so Render Select TOPs always receive the current frame. Turn *Active* off to stop the sensor and the per-frame cost.
+
 * Only one Kinect device per machine is supported.
 * Only one FreenectTD OP can be active at a time.
 * Skeleton tracking is currently impossible to implement.

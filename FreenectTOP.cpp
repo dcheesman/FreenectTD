@@ -45,6 +45,7 @@ extern "C" {
         info->customOPInfo.maxInputs = 0;
         info->customOPInfo.majorVersion = 1;
         info->customOPInfo.minorVersion = 1;
+        info->customOPInfo.cookOnStart = true; // required for cookEveryFrame to start without a viewer
         #if TD_VERSION == 2025
             info->customOPInfo.opHelpURL->setString("https://github.com/stosumarte/FreenectTD");
         #endif
@@ -184,6 +185,12 @@ void FreenectTOP::setupParameters(TD::OP_ParameterManager* manager, void*) {
 
 // TD - Cook every frame
 void FreenectTOP::getGeneralInfo(TD::TOP_GeneralInfo* ginfo, const TD::OP_Inputs* inputs, void*) {
+    // A sensor is an external input: while Active, cook every frame even when nothing in the
+    // network is viewing this node, so Render Select TOPs downstream always see the latest frame
+    // (e.g. in perform mode or while editing another network). cookOnStart in FillTOPPluginInfo
+    // kick-starts this. When inactive, fall back to cooking only when something asks.
+    const bool active = inputs && inputs->getParInt("Active") != 0;
+    ginfo->cookEveryFrame = active;
     ginfo->cookEveryFrameIfAsked = true;
 }
 

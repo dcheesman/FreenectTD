@@ -136,6 +136,18 @@ void FreenectTOP::setupParameters(TD::OP_ParameterManager* manager, void*) {
     toggle("Pcflipx", "Point Cloud Flip X", 0.0, PG);
     toggle("Pcflipy", "Point Cloud Flip Y", 0.0, PG);
     toggle("Pcflipz", "Point Cloud Flip Z (+Z toward viewer)", 0.0, PG);
+    // Sentinels for invalid data. Alpha (point cloud) / 0-masking is still the authoritative validity
+    // signal; these only decide what value lands in the dead pixels for pipelines that cannot read alpha.
+    {
+        OP_NumericParameter t; t.name = "Unknowndepth"; t.label = "Unknown Depth Value (output units)"; t.page = PG;
+        t.defaultValues[0] = 0.0; t.minSliders[0] = -1.0; t.maxSliders[0] = 10000.0;
+        manager->appendFloat(t);
+    }
+    {
+        OP_NumericParameter t; t.name = "Unknownpoint"; t.label = "Unknown Point Value"; t.page = PG;
+        for (int i = 0; i < 3; ++i) { t.defaultValues[i] = 0.0; t.minSliders[i] = -10.0; t.maxSliders[i] = 100.0; }
+        manager->appendXYZ(t);
+    }
 
     // =====================================================================
     // RESOLUTION PAGE - presets only; every size is a nearest-neighbour
@@ -643,7 +655,7 @@ void FreenectTOP::fn2_execute(TD::TOP_Output* output, const TD::OP_Inputs* input
     // --- Point Cloud frame ---
     if (streamEnabledPC) {
         std::vector<float> pointCloudFrame;
-        if (pointCloudFrameBuffer && fn2_device->getPointCloudFrame(pointCloudFrame, pcSpace, depthThreshMin, depthThreshMax, pcFlipX, pcFlipY, pcFlipZ)) {
+        if (pointCloudFrameBuffer && fn2_device->getPointCloudFrame(pointCloudFrame, pcSpace, depthThreshMin, depthThreshMax, pcFlipX, pcFlipY, pcFlipZ, unknownPoint)) {
             errorString.clear();
             std::memcpy(pointCloudFrameBuffer->data, pointCloudFrame.data(), fn2_pcW * fn2_pcH * 4 * sizeof(float));
             TD::TOP_UploadInfo info;
@@ -747,6 +759,8 @@ void FreenectTOP::execute(TD::TOP_Output* output, const TD::OP_Inputs* inputs, v
     manualDepthThresh = (inputs->getParInt("Manualdepththresh") != 0);
     depthThreshMin = static_cast<float>(inputs->getParDouble("Depththreshmin"));
     depthThreshMax = static_cast<float>(inputs->getParDouble("Depththreshmax"));
+    unknownDepth = static_cast<float>(inputs->getParDouble("Unknowndepth"));
+    for (int i = 0; i < 3; ++i) unknownPoint[i] = static_cast<float>(inputs->getParDouble("Unknownpoint", i));
     
     streamEnabledIR = (inputs->getParInt("Enableir") != 0);
     streamEnabledDepth = (inputs->getParInt("Enabledepth") != 0);
@@ -809,6 +823,7 @@ void FreenectTOP::execute(TD::TOP_Output* output, const TD::OP_Inputs* inputs, v
     dynamicParameterEnable("Pcflipx", false, true);
     dynamicParameterEnable("Pcflipy", false, true);
     dynamicParameterEnable("Pcflipz", false, true);
+    dynamicParameterEnable("Unknownpoint", false, true);
     dynamicParameterEnable("Enableregcolor", false, true);
     if (devType == "Kinect v2" && pcSpace == pcSpaceEnum::ColorCamera) {
         inputs->enablePar("V2pcres", false);
@@ -902,7 +917,7 @@ void FreenectTOP::uploadDepthFrame(TD::TOP_Output* output, const std::vector<flo
         #pragma omp parallel for if(pixelCount > 100000)
         for (size_t i = 0; i < pixelCount; ++i) {
             const float d = depthMM[i];
-            if (d <= 0.0f) { dst[i] = 0; continue; }
+            if (d <= 0.0f) { dst[i] = static_cast<uint16_t>(std::clamp(unknownDepth, 0.0f, 1.0f) * 65535.0f + 0.5f); continue; }
             const float n = std::clamp((d - depthThreshMin) / denom, 0.0f, 1.0f);
             dst[i] = static_cast<uint16_t>(n * 65535.0f + 0.5f);
         }
@@ -911,7 +926,7 @@ void FreenectTOP::uploadDepthFrame(TD::TOP_Output* output, const std::vector<flo
         const float scale = (depthOutput == depthOutputEnum::Meters) ? 0.001f : 1.0f;
         #pragma omp parallel for if(pixelCount > 100000)
         for (size_t i = 0; i < pixelCount; ++i) {
-            dst[i] = depthMM[i] * scale;
+            dst[i] = (depthMM[i] > 0.0f) ? depthMM[i] * scale : unknownDepth;
         }
     }
 

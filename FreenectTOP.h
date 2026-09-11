@@ -137,6 +137,8 @@ private:
     depthOutputEnum depthOutput = depthOutputEnum::Normalized;
     pcSpaceEnum pcSpace = pcSpaceEnum::DepthCamera;
     bool pcFlipX = false, pcFlipY = false, pcFlipZ = false;
+    float unknownDepth = 0.0f;                 // written to invalid depth pixels, in output units
+    float unknownPoint[3] = {0.0f, 0.0f, 0.0f}; // written to XYZ of invalid points
     
     bool streamEnabledIR;
     bool streamEnabledDepth;

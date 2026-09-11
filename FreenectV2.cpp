@@ -446,7 +446,11 @@ bool MyFreenect2Device::getDepthFrame(std::vector<float>& out, depthFormatEnum t
 //  ColorCamera: 1920x1080 grid, XYZ relative to the color camera, pixel-aligned with
 //               the RGB output and the Registered depth map so the RGB image can be
 //               applied as a texture with plain (u,v) = pixel position.
-bool MyFreenect2Device::getPointCloudFrame(std::vector<float>& out, pcSpaceEnum space, float depthThreshMin, float depthThreshMax, bool flipX, bool flipY, bool flipZ) {
+bool MyFreenect2Device::getPointCloudFrame(std::vector<float>& out, pcSpaceEnum space, float depthThreshMin, float depthThreshMax,
+                                           bool flipX, bool flipY, bool flipZ, const float* unknownXYZ) {
+    const float ux = unknownXYZ ? unknownXYZ[0] : 0.0f;
+    const float uy = unknownXYZ ? unknownXYZ[1] : 0.0f;
+    const float uz = unknownXYZ ? unknownXYZ[2] : 0.0f;
     LOG("[FreenectV2.cpp] getPointCloudFrame(): called, space=" + std::to_string(static_cast<int>(space)));
     int dstWidth = 0;
     int dstHeight = 0;
@@ -490,7 +494,7 @@ bool MyFreenect2Device::getPointCloudFrame(std::vector<float>& out, pcSpaceEnum 
                     o[2] = sz * z;
                     o[3] = 1.0f;
                 } else {
-                    o[0] = o[1] = o[2] = 0.0f;
+                    o[0] = ux; o[1] = uy; o[2] = uz; // unknown point value, alpha stays 0
                     o[3] = 0.0f;
                 }
             }
@@ -508,7 +512,7 @@ bool MyFreenect2Device::getPointCloudFrame(std::vector<float>& out, pcSpaceEnum 
                     o[2] = sz * z;
                     o[3] = 1.0f;
                 } else {
-                    o[0] = o[1] = o[2] = 0.0f;
+                    o[0] = ux; o[1] = uy; o[2] = uz; // unknown point value, alpha stays 0
                     o[3] = 0.0f;
                 }
             }

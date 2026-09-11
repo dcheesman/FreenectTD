@@ -108,10 +108,10 @@ Example .toe project files are provided in this repository, under the `toe_examp
 
 ### Known limitations
 
-* While *Active* is on the operator cooks every frame, even when nothing is viewing it, so Render Select TOPs always receive the current frame. Turn *Active* off to stop the sensor and the per-frame cost.
+* Like every TOP, FreenectTOP only cooks when something uses its output. If your Render Select TOPs stop updating while you are in another network or in perform mode, end the chain in a Null TOP with its display flag on (or display the result somewhere).
+* Only one FreenectTOP can be active per TouchDesigner process. A second active node shows an error and stays idle until *Active* is turned off on the first one.
 
 * Only one Kinect device per machine is supported.
-* Only one FreenectTD OP can be active at a time.
 * Skeleton tracking is currently impossible to implement.
 
 ## Uninstalling

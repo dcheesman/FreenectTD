@@ -45,7 +45,6 @@ extern "C" {
         info->customOPInfo.maxInputs = 0;
         info->customOPInfo.majorVersion = 1;
         info->customOPInfo.minorVersion = 1;
-        info->customOPInfo.cookOnStart = true; // required for cookEveryFrame to start without a viewer
         #if TD_VERSION == 2025
             info->customOPInfo.opHelpURL->setString("https://github.com/stosumarte/FreenectTD");
         #endif
@@ -185,12 +184,9 @@ void FreenectTOP::setupParameters(TD::OP_ParameterManager* manager, void*) {
 
 // TD - Cook every frame
 void FreenectTOP::getGeneralInfo(TD::TOP_GeneralInfo* ginfo, const TD::OP_Inputs* inputs, void*) {
-    // A sensor is an external input: while Active, cook every frame even when nothing in the
-    // network is viewing this node, so Render Select TOPs downstream always see the latest frame
-    // (e.g. in perform mode or while editing another network). cookOnStart in FillTOPPluginInfo
-    // kick-starts this. When inactive, fall back to cooking only when something asks.
-    const bool active = inputs && inputs->getParInt("Active") != 0;
-    ginfo->cookEveryFrame = active;
+    // Cook every frame, but only while something downstream uses the output (a viewer, a Render
+    // Select feeding a displayed chain, a Null TOP with its display flag on). Cooking unconditionally
+    // was tried and made whole networks sluggish, so leave the pull model in charge.
     ginfo->cookEveryFrameIfAsked = true;
 }
 
@@ -214,11 +210,38 @@ FreenectTOP::FreenectTOP(const TD::OP_NodeInfo* info, TD::TOP_Context* context)
     // Do not initialize device here, will be done in execute
 }
 
+// ---------------------------------------------------------------------------
+// Process-wide sensor ownership: only one FreenectTOP instance may open the Kinect.
+// ---------------------------------------------------------------------------
+std::mutex   FreenectTOP::s_ownerMutex;
+FreenectTOP* FreenectTOP::s_owner = nullptr;
+
+bool FreenectTOP::claimSensor() {
+    std::lock_guard<std::mutex> lock(s_ownerMutex);
+    if (s_owner == nullptr) s_owner = this;
+    return s_owner == this;
+}
+
+void FreenectTOP::releaseSensor() {
+    bool wasOwner = false;
+    {
+        std::lock_guard<std::mutex> lock(s_ownerMutex);
+        if (s_owner == this) { s_owner = nullptr; wasOwner = true; }
+    }
+    if (wasOwner) {
+        // Close the device so the next node that becomes active can open it.
+        fn2_cleanupDevice();
+        fn1_cleanupDevice();
+        lastDeviceType.clear();
+    }
+}
+
 // Destructor for FreenectTOP
 FreenectTOP::~FreenectTOP() {
     LOG("[FreenectTOP] Destructor called, cleaning up devices");
     fn2_cleanupDevice();
     fn1_cleanupDevice();
+    releaseSensor();
     //fallbackBuffer.release(); // Release fallback buffer
 }
 
@@ -711,7 +734,6 @@ void FreenectTOP::execute(TD::TOP_Output* output, const TD::OP_Inputs* inputs, v
     bool isActive = (inputs && inputs->getParInt("Active") != 0);
     const char* devTypeCStr = inputs->getParString("Hardwareversion");
     std::string devType = devTypeCStr ? devTypeCStr : "Kinect v1";
-    static std::string lastDeviceType = "Kinect v1";
     
     // Set depthFormat from parameters
     {
@@ -826,9 +848,18 @@ void FreenectTOP::execute(TD::TOP_Output* output, const TD::OP_Inputs* inputs, v
         warningString = "FreenectTOP is inactive";
         uploadFallbackBuffer();
         errorString.clear();
+        releaseSensor(); // let another FreenectTOP take the sensor
         return;
     } else {
         warningString.clear();
+    }
+
+    // Only one FreenectTOP per process may talk to the sensor. A second active node would
+    // fight the first for the USB device and both would stall, so it stays idle with an error.
+    if (!claimSensor()) {
+        errorString = "Another FreenectTOP is already active. Only one can run at a time; turn Active off on the other node first.";
+        uploadFallbackBuffer();
+        return;
     }
     
     // Check if device type changed - only clean up and log if it actually changed

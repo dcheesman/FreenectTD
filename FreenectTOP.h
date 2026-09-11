@@ -94,6 +94,11 @@ private:
     void fn1_execute(TD::TOP_Output* output, const TD::OP_Inputs* inputs);
     void fn2_execute(TD::TOP_Output* output, const TD::OP_Inputs* inputs);
     void uploadFallbackBuffer(int targetIndex = -1);
+    // One active FreenectTOP per process (see claimSensor in FreenectTOP.cpp)
+    static std::mutex   s_ownerMutex;
+    static FreenectTOP* s_owner;
+    bool claimSensor();
+    void releaseSensor();
     static constexpr int kNumOutputs = 6; // 0 RGB, 1 depth, 2 point cloud, 3 IR, 4 registered color, 5 depth->color UV
     void uploadDepthFrame(TD::TOP_Output* output, const std::vector<float>& depthMM, int width, int height);
     
@@ -128,6 +133,7 @@ private:
     bool manualDepthThresh;
     float depthThreshMin, depthThreshMax;
     depthFormatEnum depthFormat = depthFormatEnum::Raw;
+    std::string lastDeviceType = "Kinect v1"; // per instance; used to tear down devices when Hardware Version changes
     depthOutputEnum depthOutput = depthOutputEnum::Normalized;
     pcSpaceEnum pcSpace = pcSpaceEnum::DepthCamera;
     bool pcFlipX = false, pcFlipY = false, pcFlipZ = false;
